@@ -81,9 +81,15 @@ pub fn read_kernels(path: &Path) -> Result<Vec<KernelRow>> {
             shared_static: r.get(14)?,
             shared_dynamic: r.get(15)?,
             graph_node_id: r.get(16)?,
+            step: 0,
         })
     })?;
-    let kernels = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut kernels = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+
+    let readbacks = readback_starts(&db)?;
+    for k in &mut kernels {
+        k.step = readbacks.partition_point(|&t| t < k.start_ns) as u32;
+    }
 
     let total = count(&db, &format!("SELECT count(*) FROM {TABLE}"))?;
     if total != kernels.len() as i64 {
@@ -93,6 +99,23 @@ pub fn read_kernels(path: &Path) -> Result<Vec<KernelRow>> {
         );
     }
     Ok(kernels)
+}
+
+/// Start times of every device-to-host copy, sorted.
+///
+/// llama.cpp copies the logits back to the host once at the end of every
+/// eval (warmup, prompt, then one per generated token), so these copies
+/// split the kernel stream into steps.
+fn readback_starts(db: &Connection) -> Result<Vec<i64>> {
+    const COPY_DTOH: i64 = 2; // ENUM_CUDA_MEMCPY_OPER
+    if table_columns(db, "CUPTI_ACTIVITY_KIND_MEMCPY")?.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut stmt = db.prepare(
+        "SELECT start FROM CUPTI_ACTIVITY_KIND_MEMCPY WHERE copyKind = ?1 ORDER BY start",
+    )?;
+    let starts = stmt.query_map([COPY_DTOH], |r| r.get(0))?;
+    Ok(starts.collect::<rusqlite::Result<_>>()?)
 }
 
 fn table_columns(db: &Connection, table: &str) -> Result<HashSet<String>> {
@@ -163,6 +186,28 @@ mod tests {
         assert_eq!(kernels[1].shared_dynamic, 512);
         assert_eq!(kernels[1].stream, 7);
         assert_eq!(kernels[1].graph_node_id, None);
+        // no memcpy table in this export, so nothing splits the stream
+        assert!(kernels.iter().all(|k| k.step == 0));
+    }
+
+    #[test]
+    fn splits_steps_at_logit_readbacks() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = fixture(dir.path(), false);
+        // a host-to-device copy (kind 1) must not count as a step boundary
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE CUPTI_ACTIVITY_KIND_MEMCPY (
+                    start INTEGER NOT NULL, end INTEGER NOT NULL,
+                    bytes INTEGER NOT NULL, copyKind INTEGER NOT NULL);
+                 INSERT INTO CUPTI_ACTIVITY_KIND_MEMCPY VALUES
+                    (500, 600, 64, 1), (2_000, 2_100, 607744, 2), (9_600, 9_700, 607744, 2);",
+            )
+            .unwrap();
+        let kernels = read_kernels(&path).unwrap();
+        let steps: Vec<_> = kernels.iter().map(|k| k.step).collect();
+        assert_eq!(steps, [0, 1]);
     }
 
     #[test]

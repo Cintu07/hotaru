@@ -34,6 +34,9 @@ pub struct KernelRow {
     pub shared_static: u32,
     pub shared_dynamic: u32,
     pub graph_node_id: Option<i64>,
+    /// Which engine step the kernel belongs to. For llama.cpp traces this is
+    /// 0 for warmup, 1 for the prompt, then one step per generated token.
+    pub step: u32,
 }
 
 impl KernelRow {
@@ -58,6 +61,7 @@ pub fn kernels_schema(source: &str) -> Schema {
     ]);
     Schema::new(vec![
         u32_col("seq"),
+        u32_col("step"),
         Field::new("name", dict(), false),
         Field::new("demangled", dict(), false),
         Field::new("start_ns", DataType::Int64, false),
@@ -103,6 +107,7 @@ pub fn kernels_batch(rows: &[KernelRow], source: &str) -> Result<RecordBatch> {
 
     let columns: Vec<ArrayRef> = vec![
         Arc::new(seq.finish()),
+        u32s(&|r| r.step),
         Arc::new(name.finish()),
         Arc::new(demangled.finish()),
         Arc::new(start.finish()),
@@ -154,6 +159,7 @@ mod tests {
             shared_static: 0,
             shared_dynamic: 0,
             graph_node_id: None,
+            step: 0,
         }
     }
 

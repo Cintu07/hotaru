@@ -67,6 +67,21 @@ fn print_summary(kernels: &[trace::KernelRow]) {
         busy as f64 / 1e6,
         100.0 * busy as f64 / span.max(1) as f64
     );
+
+    let mut per_step: HashMap<u32, usize> = HashMap::new();
+    kernels
+        .iter()
+        .for_each(|k| *per_step.entry(k.step).or_default() += 1);
+    let mut sizes: HashMap<usize, usize> = HashMap::new();
+    per_step
+        .values()
+        .for_each(|n| *sizes.entry(*n).or_default() += 1);
+    if let Some((size, steps)) = sizes.iter().max_by_key(|(_, n)| **n) {
+        println!(
+            "{} steps; {steps} of them have {size} kernels each",
+            per_step.len()
+        );
+    }
     for (name, (n, t)) in top.iter().take(8) {
         println!(
             "  {:>6.2}%  {n:>7}x  {name}",
