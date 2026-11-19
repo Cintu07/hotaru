@@ -4,3 +4,14 @@ version = "0.1.0"
 edition = "2024"
 description = "draws what an llm inference engine does inside the gpu, from real traces"
 license = "MIT"
+
+[dependencies]
+anyhow = "1.0.104"
+arrow-array = "60.1.0"
+arrow-ipc = "60.1.0"
+arrow-schema = "60.1.0"
+clap = { version = "4.6.8", features = ["derive"] }
+rusqlite = { version = "0.43.0", features = ["bundled"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"
