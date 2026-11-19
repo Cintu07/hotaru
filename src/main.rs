@@ -1,3 +1,4 @@
+mod ncu;
 mod nsys;
 mod trace;
 
@@ -27,6 +28,22 @@ enum Command {
         #[arg(short, long, default_value = "kernels.arrow")]
         out: PathBuf,
     },
+    /// Join an ncu csv export to kernels.arrow and write kernel_metrics.arrow
+    Ncu {
+        /// csv from `ncu --import r.ncu-rep --csv --page raw --print-units base`
+        input: PathBuf,
+        /// kernels.arrow of the nsys run made with the same command
+        #[arg(long)]
+        kernels: PathBuf,
+        /// the --launch-skip that ncu was run with
+        #[arg(long)]
+        skip: usize,
+        /// model file to compare dram bytes read per step against
+        #[arg(long)]
+        model: Option<PathBuf>,
+        #[arg(short, long, default_value = "kernel_metrics.arrow")]
+        out: PathBuf,
+    },
 }
 
 fn main() -> Result<()> {
@@ -36,6 +53,19 @@ fn main() -> Result<()> {
             let batch = trace::kernels_batch(&kernels, "nsys")?;
             trace::write_batch(&out, &batch)?;
             print_summary(&kernels);
+            println!("wrote {}", out.display());
+        }
+        Command::Ncu {
+            input,
+            kernels,
+            skip,
+            model,
+            out,
+        } => {
+            let table = ncu::read_csv(&input)?;
+            let joined = ncu::join(&table, &kernels, skip)?;
+            trace::write_batch(&out, &joined.batch)?;
+            print_window(&table.metrics, &joined.per_step, model.as_deref())?;
             println!("wrote {}", out.display());
         }
     }
@@ -88,4 +118,30 @@ fn print_summary(kernels: &[trace::KernelRow]) {
             100.0 * *t as f64 / busy as f64
         );
     }
+}
+
+fn print_window(
+    metrics: &[String],
+    per_step: &[(u32, usize, Vec<u64>)],
+    model: Option<&std::path::Path>,
+) -> Result<()> {
+    let model_bytes = model
+        .map(|m| std::fs::metadata(m).map(|md| md.len()))
+        .transpose()?;
+    let read = metrics.iter().position(|m| m == "dram__bytes_op_read.sum");
+    for (step, count, sums) in per_step {
+        println!("step {step}: {count} kernels");
+        for (m, v) in metrics.iter().zip(sums) {
+            println!("  {m:<56} {v:>16}");
+        }
+        if let (Some(r), Some(size)) = (read, model_bytes) {
+            let bytes = sums[r] as f64;
+            println!(
+                "  dram read / model file = {:.0} / {size} = {:.4}",
+                bytes,
+                bytes / size as f64
+            );
+        }
+    }
+    Ok(())
 }
