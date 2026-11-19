@@ -78,7 +78,10 @@ fn print_summary(kernels: &[trace::KernelRow]) {
         println!("no kernels");
         return;
     };
-    let busy: i64 = kernels.iter().map(|k| k.duration_ns()).sum();
+    // kernels overlap when llama.cpp uses programmatic dependent launch, so
+    // summed durations overstate how long the gpu was busy
+    let busy = trace::busy_ns(kernels);
+    let kernel_time: i64 = kernels.iter().map(|k| k.duration_ns()).sum();
     let mut by_name: HashMap<&str, (usize, i64)> = HashMap::new();
     for k in kernels {
         let e = by_name.entry(&k.name).or_default();
@@ -90,12 +93,13 @@ fn print_summary(kernels: &[trace::KernelRow]) {
 
     let span = last - first.start_ns;
     println!(
-        "{} kernels, {} distinct, span {:.3} ms, gpu busy {:.3} ms ({:.1}%)",
+        "{} kernels, {} distinct, span {:.3} ms, gpu busy {:.3} ms ({:.1}%), kernel time {:.3} ms",
         kernels.len(),
         by_name.len(),
         span as f64 / 1e6,
         busy as f64 / 1e6,
-        100.0 * busy as f64 / span.max(1) as f64
+        100.0 * busy as f64 / span.max(1) as f64,
+        kernel_time as f64 / 1e6
     );
 
     let mut per_step: HashMap<u32, usize> = HashMap::new();
@@ -115,7 +119,7 @@ fn print_summary(kernels: &[trace::KernelRow]) {
     for (name, (n, t)) in top.iter().take(8) {
         println!(
             "  {:>6.2}%  {n:>7}x  {name}",
-            100.0 * *t as f64 / busy as f64
+            100.0 * *t as f64 / kernel_time as f64
         );
     }
 }

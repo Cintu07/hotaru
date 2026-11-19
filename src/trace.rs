@@ -45,6 +45,21 @@ impl KernelRow {
     }
 }
 
+/// Time during which at least one kernel was running. Rows must be in
+/// start order.
+pub fn busy_ns(rows: &[KernelRow]) -> i64 {
+    let mut busy = 0;
+    let mut covered_to = i64::MIN;
+    for r in rows {
+        let start = r.start_ns.max(covered_to);
+        if r.end_ns > start {
+            busy += r.end_ns - start;
+        }
+        covered_to = covered_to.max(r.end_ns);
+    }
+    busy
+}
+
 fn dict() -> DataType {
     DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8))
 }
@@ -161,6 +176,20 @@ mod tests {
             graph_node_id: None,
             step: 0,
         }
+    }
+
+    #[test]
+    fn busy_time_counts_overlapping_kernels_once() {
+        // b starts before a ends, c is inside b, then a gap before d
+        let rows = [
+            row("a", 0, 10),
+            row("b", 8, 20),
+            row("c", 12, 15),
+            row("d", 30, 35),
+        ];
+        assert_eq!(busy_ns(&rows), 25);
+        let summed: i64 = rows.iter().map(|r| r.duration_ns()).sum();
+        assert_eq!(summed, 30);
     }
 
     #[test]
