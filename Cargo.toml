@@ -1,0 +1,6 @@
+[package]
+name = "hotaru"
+version = "0.1.0"
+edition = "2024"
+description = "draws what an llm inference engine does inside the gpu, from real traces"
+license = "MIT"

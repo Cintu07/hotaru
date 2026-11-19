@@ -1,0 +1,11 @@
+/target
+
+# profiler output and converted traces are large and machine specific
+/traces
+*.nsys-rep
+*.ncu-rep
+*.sqlite
+*.qdstrm
+
+# renders and exports
+/renders
